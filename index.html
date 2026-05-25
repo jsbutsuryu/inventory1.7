@@ -510,16 +510,16 @@ async function startBcScan() {
 
   // qrboxは映像サイズに対する比率で指定（固定値だと内部エラーが起きる）
   const config = {
-    fps: 15,
+    fps: 10,
     qrbox: (w, h) => {
-      const bw = Math.min(Math.floor(w * 0.8), 400);
-      const bh = Math.max(Math.floor(bw * 0.35), 80);
+      const bw = Math.min(Math.floor(w * 0.9), 500);
+      const bh = Math.max(Math.floor(bw * 0.45), 120);
       return { width: bw, height: bh };
     },
     aspectRatio: 16/9,
     supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
     // iOSはWorkerが使えないため無効化
-    experimentalFeatures: { useBarCodeDetectorIfSupported: false }
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
   };
 
   _h5scanner = new Html5Qrcode('bc-reader');
