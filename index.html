@@ -203,20 +203,27 @@ tr:last-child td{border-bottom:none}
   </div>
   <div class="card">
     <div class="ct">バーコードスキャン</div>
-    <div class="gas-note" style="margin-bottom:12px">
+    <div class="gas-note" style="margin-bottom:12px" id="bc-note">
       「スキャン開始」を押してバーコードをカメラに映すと、AIが品名を取得してスプレッドシートに自動記録します。
     </div>
     <!-- スキャナー起動前 -->
     <div id="bc-start-area" style="text-align:center;padding:16px 0">
       <button class="btn bp" style="font-size:14px;padding:11px 28px" onclick="startBcScan()">▦ スキャン開始</button>
+      <!-- iPhone用: 隠しinput（カメラ撮影） -->
+      <input type="file" id="bc-ios-input" accept="image/*" capture="environment"
+             style="display:none" onchange="onIosImageSelected(this)">
     </div>
-    <!-- スキャナー起動中 -->
+    <!-- スキャナー起動中（PC/Android） -->
     <div id="bc-scanner-area" class="hidden">
       <div id="bc-reader" style="width:100%"></div>
       <div style="text-align:center;margin-top:10px">
         <button class="btn bd bsm" onclick="stopBcScan()">■ キャンセル</button>
       </div>
       <div class="bc-scan-status" id="bc-scan-status" style="margin-top:8px"></div>
+    </div>
+    <!-- iPhone処理中 -->
+    <div id="bc-ios-processing" class="hidden" style="text-align:center;padding:16px 0">
+      <div class="bc-scan-status" id="bc-ios-status"></div>
     </div>
     <!-- 結果表示（スキャン完了後） -->
     <div id="bc-result-area" class="hidden" style="margin-top:12px">
@@ -472,6 +479,15 @@ async function startBcScan() {
   if (!worker) { alert('作業者名を入力してください。'); return; }
   if (!gasUrl)  { alert('先に設定タブでGAS URLを登録してください。'); return; }
 
+  // iPhoneは画像アップロード方式（最も確実）
+  if (/iPhone|iPad/i.test(navigator.userAgent)) {
+    document.getElementById('bc-result-area').classList.add('hidden');
+    document.getElementById('bc-ios-processing').classList.add('hidden');
+    document.getElementById('bc-ios-input').value = '';
+    document.getElementById('bc-ios-input').click(); // カメラを起動
+    return;
+  }
+
   await _stopH5();
   bcCooldown = false;
 
@@ -497,18 +513,10 @@ async function startBcScan() {
     return;
   }
 
-  // カメラ選択: スマホはリアカメラ優先、PCは先頭
-  const isIOS     = /iPhone|iPad/i.test(navigator.userAgent);
-  const isMobile  = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  let camId;
-  if (isMobile) {
-    const back = cameras.find(d => /back|rear|environment/i.test(d.label));
-    camId = back ? back.id : cameras[cameras.length - 1].id;
-  } else {
-    camId = cameras[0].id;
-  }
+  const isIOS    = /iPhone|iPad/i.test(navigator.userAgent);
+  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
 
-  // qrboxは映像サイズに対する比率で指定（固定値だと内部エラーが起きる）
+  // qrboxは映像サイズに対する比率で指定
   const config = {
     fps: 10,
     qrbox: (w, h) => {
@@ -518,22 +526,112 @@ async function startBcScan() {
     },
     aspectRatio: 16/9,
     supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-    // iOSはWorkerが使えないため無効化
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+    experimentalFeatures: { useBarCodeDetectorIfSupported: !isIOS }
   };
 
   _h5scanner = new Html5Qrcode('bc-reader');
+
+  if (isIOS) {
+    // ── iPhone/iPad: facingModeで直接起動（カメラIDより安定）──
+    try {
+      await _h5scanner.start(
+        { facingMode: { exact: 'environment' } },
+        config,
+        (code) => { if (!bcCooldown) onBcDetected(code); },
+        () => {}
+      );
+      setBcStatus('in', 'バーコードを枠内に合わせてください');
+    } catch(e) {
+      // exact指定が失敗したらfacingMode文字列で再試行
+      try {
+        await _h5scanner.start(
+          { facingMode: 'environment' },
+          config,
+          (code) => { if (!bcCooldown) onBcDetected(code); },
+          () => {}
+        );
+        setBcStatus('in', 'バーコードを枠内に合わせてください');
+      } catch(e2) {
+        await _stopH5();
+        document.getElementById('bc-scanner-area').classList.add('hidden');
+        document.getElementById('bc-start-area').classList.remove('hidden');
+        alert('カメラの起動に失敗しました。\niPhoneの場合: 設定→Chrome→カメラを「許可」にしてください。\n\n'+e2);
+      }
+    }
+  } else {
+    // ── PC / Android: カメラIDで起動（最も安定・高精度）──
+    let camId;
+    if (isMobile) {
+      const back = cameras.find(d => /back|rear|environment/i.test(d.label));
+      camId = back ? back.id : cameras[cameras.length - 1].id;
+    } else {
+      camId = cameras[0].id;
+    }
+    try {
+      await _h5scanner.start(
+        camId,
+        config,
+        (code) => { if (!bcCooldown) onBcDetected(code); },
+        () => {}
+      );
+      setBcStatus('in', 'バーコードを枠内に合わせてください');
+    } catch(e) {
+      await _stopH5();
+      document.getElementById('bc-scanner-area').classList.add('hidden');
+      document.getElementById('bc-start-area').classList.remove('hidden');
+      alert('カメラの起動に失敗しました。\n\n'+e);
+    }
+  }
+}
+
+// iPhone用: 撮影画像からバーコードを読み取る
+async function onIosImageSelected(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+
+  document.getElementById('bc-ios-processing').classList.remove('hidden');
+  const statusEl = document.getElementById('bc-ios-status');
+  statusEl.innerHTML = '<div class="badge bs-in"><span class="spin"></span> バーコード解析中...</div>';
+
   try {
-    await _h5scanner.start(camId, config,
-      (code) => { if (!bcCooldown) onBcDetected(code); },
-      () => {}
-    );
-    setBcStatus('in', 'バーコードを枠内に合わせてください');
+    // BarcodeDetector APIで画像からバーコードを読み取る
+    let barcode = null;
+
+    if (typeof BarcodeDetector !== 'undefined') {
+      // BarcodeDetector対応（iOS16+ Safari等）
+      const detector = new BarcodeDetector({ formats: [
+        'ean_13','ean_8','code_128','code_39','code_93',
+        'upc_a','upc_e','itf','codabar','qr_code','data_matrix','pdf417'
+      ]});
+      const img = await createImageBitmap(file);
+      const results = await detector.detect(img);
+      if (results && results.length > 0) barcode = results[0].rawValue;
+    }
+
+    if (!barcode) {
+      // BarcodeDetector未対応またはiOS Chrome → canvasに描画してhtml5-qrcodeで読む
+      const dataUrl = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(file);
+      });
+      barcode = await new Promise((resolve, reject) => {
+        const scanner = new Html5Qrcode('bc-reader');
+        scanner.scanFile(new File([file], file.name, {type: file.type}), true)
+          .then(code => { scanner.clear(); resolve(code); })
+          .catch(e => { scanner.clear(); reject(e); });
+      });
+    }
+
+    if (!barcode) throw new Error('バーコードを検出できませんでした');
+    document.getElementById('bc-ios-processing').classList.add('hidden');
+    onBcDetected(barcode);
+
   } catch(e) {
-    await _stopH5();
-    document.getElementById('bc-scanner-area').classList.add('hidden');
-    document.getElementById('bc-start-area').classList.remove('hidden');
-    alert('カメラの起動に失敗しました。\n\n'+e);
+    statusEl.innerHTML = '<div class="badge bs-er"><span class="dot"></span>読み取り失敗: ' + e.message + '<br>もう一度撮影してください</div>';
+    setTimeout(() => {
+      document.getElementById('bc-ios-processing').classList.add('hidden');
+    }, 3000);
   }
 }
 
