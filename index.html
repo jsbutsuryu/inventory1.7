@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>入庫台帳登録Webアプリ V1.7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-<script src="https://unpkg.com/@ericblade/quagga2@1.4.0/dist/quagga.min.js"></script>
+<!-- BarcodeDetector polyfill: iOS 16未満 / 非対応ブラウザ向け -->
+<script src="https://unpkg.com/barcode-detector@2.2.5/dist/es2019/polyfill.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
@@ -211,7 +212,9 @@ tr:last-child td{border-bottom:none}
     </div>
     <!-- スキャナー起動中 -->
     <div id="bc-scanner-area" class="hidden">
-      <div id="bc-viewport" style="position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;min-height:200px">
+      <div style="position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden">
+        <video id="bc-video" autoplay playsinline muted style="width:100%;display:block;max-height:280px;object-fit:cover"></video>
+        <canvas id="bc-canvas" style="display:none"></canvas>
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:75%;height:90px;border:2px solid #1D9E75;border-radius:6px;pointer-events:none;z-index:2;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)"></div>
         <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#fff;pointer-events:none;z-index:2">バーコードを枠内に合わせてください</div>
       </div>
@@ -430,24 +433,21 @@ async function captureOCR() {
   setTimeout(() => { document.getElementById('ocr-prog').classList.add('hidden'); pf.style.width = '0'; }, 1500);
 }
 
-// ─── バーコードスキャン (Quagga2 / ワンショット方式) ──────────────────
+// ─── バーコードスキャン (BarcodeDetector / ワンショット方式) ────────────
 
 function setBcStatus(type, msg) {
-  const c = type === 'ok' ? 'bs-ok' : type === 'er' ? 'bs-er' : 'bs-in';
-  document.getElementById('bc-scan-status').innerHTML = '<div class="badge ' + c + '">' + msg + '</div>';
+  const c = type==='ok'?'bs-ok':type==='er'?'bs-er':'bs-in';
+  document.getElementById('bc-scan-status').innerHTML='<div class="badge '+c+'">'+msg+'</div>';
 }
-
 function addBcLog(barcode, name, status, datetime) {
-  bcLogItems.unshift({barcode, name, status, datetime});
+  bcLogItems.unshift({barcode,name,status,datetime});
   renderBcLog();
-  document.getElementById('bc-log-card').style.display = 'block';
+  document.getElementById('bc-log-card').style.display='block';
 }
-
 function renderBcLog() {
-  const list = document.getElementById('bc-log-list');
-  list.innerHTML = bcLogItems.map(item => {
-    const sc = item.status === 'ok' ? 'ls-ok' : 'ls-er';
-    const sl = item.status === 'ok' ? '✓ 記録済み' : '✗ エラー';
+  document.getElementById('bc-log-list').innerHTML = bcLogItems.map(item => {
+    const sc=item.status==='ok'?'ls-ok':'ls-er';
+    const sl=item.status==='ok'?'✓ 記録済み':'✗ エラー';
     return `<div class="log-item">
       <div class="log-item-name">${item.name}</div>
       <div class="log-item-bc">バーコード: ${item.barcode}</div>
@@ -456,16 +456,22 @@ function renderBcLog() {
     </div>`;
   }).join('');
 }
-
 function clearBcLog() {
-  bcLogItems = [];
-  document.getElementById('bc-log-list').innerHTML = '';
-  document.getElementById('bc-log-card').style.display = 'none';
+  bcLogItems=[];
+  document.getElementById('bc-log-list').innerHTML='';
+  document.getElementById('bc-log-card').style.display='none';
 }
 
-function stopQuagga() {
-  try { Quagga.offDetected(); } catch(e) {}
-  try { Quagga.stop(); } catch(e) {}
+// スキャンループ管理
+let bcRafId = null;
+let bcStream = null;
+let bcDetector = null;
+
+function stopBcStream() {
+  if (bcRafId) { cancelAnimationFrame(bcRafId); bcRafId = null; }
+  if (bcStream) { bcStream.getTracks().forEach(t=>t.stop()); bcStream = null; }
+  const v = document.getElementById('bc-video');
+  if (v) v.srcObject = null;
 }
 
 async function startBcScan() {
@@ -473,7 +479,7 @@ async function startBcScan() {
   if (!worker) { alert('作業者名を入力してください。'); return; }
   if (!gasUrl)  { alert('先に設定タブでGAS URLを登録してください。'); return; }
 
-  stopQuagga();
+  stopBcStream();
   bcCooldown = false;
 
   document.getElementById('bc-start-area').classList.add('hidden');
@@ -481,72 +487,74 @@ async function startBcScan() {
   document.getElementById('bc-scanner-area').classList.remove('hidden');
   setBcStatus('in', '<span class="spin"></span> カメラ起動中...');
 
-  const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+  // BarcodeDetector 初期化（polyfillが自動的にネイティブ/ZXingを切替）
+  try {
+    bcDetector = new BarcodeDetector({ formats: [
+      'ean_13','ean_8','code_128','code_39','code_93',
+      'upc_a','upc_e','itf','codabar','qr_code','data_matrix','pdf417'
+    ]});
+  } catch(e) {
+    // formats指定が拒否された場合はデフォルトで初期化
+    try { bcDetector = new BarcodeDetector(); }
+    catch(e2) { alert('BarcodeDetectorが使えません: '+e2); return; }
+  }
 
-  Quagga.init({
-    inputStream: {
-      name: 'Live',
-      type: 'LiveStream',
-      target: document.getElementById('bc-viewport'),
-      constraints: {
+  // カメラ起動
+  const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+  try {
+    bcStream = await navigator.mediaDevices.getUserMedia({
+      video: {
         facingMode: isIOS ? 'environment' : { ideal: 'environment' },
-        width:  { min: 640, ideal: 1280, max: 1920 },
-        height: { min: 480, ideal: 720,  max: 1080 }
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
       }
-    },
-    locator: { patchSize: 'medium', halfSample: true },
-    numOfWorkers: 0,   // iOSはWorker非対応のため0
-    frequency: 10,
-    decoder: {
-      readers: [
-        'ean_reader',
-        'ean_8_reader',
-        'code_128_reader',
-        'code_39_reader',
-        'code_93_reader',
-        'upc_reader',
-        'upc_e_reader',
-        'i2of5_reader',
-        'codabar_reader'
-      ]
-    },
-    locate: true
-  }, (err) => {
-    if (err) {
+    });
+  } catch(e) {
+    try {
+      bcStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    } catch(e2) {
       document.getElementById('bc-scanner-area').classList.add('hidden');
       document.getElementById('bc-start-area').classList.remove('hidden');
-      alert('カメラの起動に失敗しました。\nカメラのアクセス許可を確認してください。\n\n詳細: ' + err);
+      alert('カメラ起動失敗。カメラの許可を確認してください。\n\n'+e2);
       return;
     }
-    Quagga.start();
-    setBcStatus('in', 'バーコードを枠内に合わせてください');
+  }
 
-    // 検出イベント（信頼度フィルタ付き）
-    Quagga.onDetected((data) => {
-      if (bcCooldown) return;
+  const video = document.getElementById('bc-video');
+  video.srcObject = bcStream;
+  await new Promise(resolve => { video.onloadedmetadata = resolve; });
+  await video.play();
 
-      // 信頼度チェック: 全コードが一定以上の信頼度を持つものだけ採用
-      const code = data.codeResult;
-      const errors = code.decodedCodes
-        .filter(c => c.error !== undefined)
-        .map(c => c.error);
-      const avgError = errors.length
-        ? errors.reduce((a, b) => a + b, 0) / errors.length
-        : 1;
+  setBcStatus('in', 'バーコードを枠内に合わせてください');
 
-      if (avgError > 0.25) return; // 信頼度が低い場合は無視
+  // requestAnimationFrame ループでフレームごとに検出
+  const canvas = document.getElementById('bc-canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-      onBcDetected(code.code);
-    });
-  });
+  const tick = async () => {
+    if (!bcStream || bcCooldown) return;
+    if (video.readyState >= 2) {
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      try {
+        const results = await bcDetector.detect(canvas);
+        if (results && results.length > 0) {
+          const code = results[0].rawValue;
+          if (code) { onBcDetected(code); return; }
+        }
+      } catch(e) { /* 未検出は正常 */ }
+    }
+    bcRafId = requestAnimationFrame(tick);
+  };
+  bcRafId = requestAnimationFrame(tick);
 }
 
 async function onBcDetected(barcode) {
   if (bcCooldown) return;
   bcCooldown = true;
 
-  stopQuagga();
-
+  stopBcStream();
   document.getElementById('bc-scanner-area').classList.add('hidden');
   document.getElementById('bc-start-area').classList.remove('hidden');
 
@@ -554,43 +562,40 @@ async function onBcDetected(barcode) {
   const date   = document.getElementById('bc-date').value;
 
   try {
-    setBcStatus('in', '<span class="spin"></span> 検出: ' + barcode + ' — AI品名取得中...');
+    setBcStatus('in', '<span class="spin"></span> 検出: '+barcode+' — AI品名取得中...');
 
     let productName = barcode;
     try {
-      const name = await extractProductNameViaGAS('バーコード番号: ' + barcode);
+      const name = await extractProductNameViaGAS('バーコード番号: '+barcode);
       if (name && name !== '不明') productName = name;
-    } catch(e) {
-      console.warn('AI品名取得失敗:', e.message);
-    }
+    } catch(e) { console.warn('AI品名取得失敗:', e.message); }
 
     setBcStatus('in', '<span class="spin"></span> スプレッドシートに記録中...');
     await sendViaForm({
       datetime: new Date().toLocaleString('ja-JP'),
       worker, date,
       itemName: productName,
-      qty: '1', unit: '個',
-      method: 'バーコード(Quagga2)',
-      barcode, memo: ''
+      qty:'1', unit:'個',
+      method:'バーコード(BarcodeDetector)',
+      barcode, memo:''
     });
 
     addBcLog(barcode, productName, 'ok', new Date().toLocaleString('ja-JP'));
-    setBcStatus('ok', '✓ 記録完了: ' + productName);
+    setBcStatus('ok', '✓ 記録完了: '+productName);
     document.getElementById('bc-result-name').textContent = productName;
-    document.getElementById('bc-result-bc').textContent = 'バーコード: ' + barcode;
+    document.getElementById('bc-result-bc').textContent   = 'バーコード: '+barcode;
     document.getElementById('bc-result-area').classList.remove('hidden');
 
   } catch(e) {
     addBcLog(barcode, '', 'er', new Date().toLocaleString('ja-JP'));
-    setBcStatus('er', '✗ 記録エラー: ' + e.message);
-
+    setBcStatus('er', '✗ 記録エラー: '+e.message);
   } finally {
     bcCooldown = false;
   }
 }
 
 async function stopBcScan() {
-  stopQuagga();
+  stopBcStream();
   bcCooldown = false;
   document.getElementById('bc-scanner-area').classList.add('hidden');
   document.getElementById('bc-result-area').classList.add('hidden');
