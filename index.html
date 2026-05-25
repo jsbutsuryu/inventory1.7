@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>入庫台帳登録Webアプリ V1.7</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
+.hdr{background:#fff;border-bottom:1px solid #e8e8e4;padding:13px 18px;display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:10}
+.hdr-icon{width:33px;height:33px;background:#1D9E75;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.hdr-icon svg{width:17px;height:17px;fill:white}
+.hdr-title{font-size:15px;font-weight:600}
+.hdr-sub{font-size:11px;color:#aaa}
+.tabs{display:flex;background:#fff;border-bottom:1px solid #e8e8e4;padding:0 18px;overflow-x:auto}
+.tab{padding:11px 14px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;color:#aaa;white-space:nowrap}
+.tab.active{color:#1D9E75;border-bottom-color:#1D9E75;font-weight:600}
+.content{padding:14px 18px;max-width:600px;margin:0 auto}
+.card{background:#fff;border:1px solid #e8e8e4;border-radius:12px;padding:14px;margin-bottom:14px}
+.ct{font-size:10px;font-weight:600;color:#aaa;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.08em}
+.fr{margin-bottom:10px}
+.fl{font-size:11px;color:#888;margin-bottom:3px;display:block}
+input[type=text],input[type=date]{width:100%;padding:9px 11px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff;color:#1a1a1a;outline:none;-webkit-appearance:none}
+input:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(29,158,117,0.12)}
+input[readonly]{background:#f8f8f6;color:#888}
+.btn-g{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
+.btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid #ddd;background:#fff;color:#1a1a1a;display:inline-flex;align-items:center;gap:5px;-webkit-tap-highlight-color:transparent}
+.btn:active{background:#f0f0ee}
+.bp{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.bp:active{background:#0F6E56}
+.bd{background:#fff0f0;color:#c0392b;border-color:#f5b7b1}
+.bsm{padding:6px 11px;font-size:12px}
+.cam-box{background:#f8f8f6;border:1px solid #e8e8e4;border-radius:10px;padding:16px;text-align:center}
+.cam-ph{padding:16px 0;color:#ccc}
+.cam-ph svg{width:34px;height:34px;margin:0 auto 5px;display:block}
+.br{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:20px;font-size:12px;font-weight:500;margin-top:8px}
+.bs-ok{background:#e1f5ee;color:#0F6E56}
+.bs-er{background:#fceaea;color:#c0392b}
+.bs-in{background:#e6f1fb;color:#185FA5}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+.spin{width:13px;height:13px;border:2px solid rgba(29,158,117,0.25);border-top-color:#1D9E75;border-radius:50%;animation:sp 0.7s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hidden{display:none}
+.pb{height:3px;background:#eee;border-radius:2px;margin-top:8px;overflow:hidden}
+.pf{height:100%;background:#1D9E75;transition:width 0.3s;width:0}
+.pt{font-size:11px;color:#aaa;margin-top:3px;text-align:center}
+.ocr-box{background:#f8f8f6;border-radius:8px;padding:10px;margin-top:8px;font-size:12px;line-height:1.6;color:#444;text-align:left}
+canvas{display:none}
+.ocr-viewer{position:relative;width:100%;border-radius:8px;overflow:hidden;background:#000;display:none}
+.ocr-viewer video{width:100%;display:block;max-height:260px;object-fit:cover}
+.ocr-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.ocr-mask{position:absolute;background:rgba(0,0,0,0.5)}
+.ocr-frame{position:absolute;border:2px solid #1D9E75;border-radius:4px;transition:all 0.15s}
+.ocr-corner{position:absolute;width:14px;height:14px;border-color:#1D9E75;border-style:solid}
+.ocr-corner.tl{top:-2px;left:-2px;border-width:3px 0 0 3px}
+.ocr-corner.tr{top:-2px;right:-2px;border-width:3px 3px 0 0}
+.ocr-corner.bl{bottom:-2px;left:-2px;border-width:0 0 3px 3px}
+.ocr-corner.br{bottom:-2px;right:-2px;border-width:0 3px 3px 0}
+.ocr-label{position:absolute;left:50%;transform:translateX(-50%);background:rgba(29,158,117,0.88);color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;bottom:calc(100% + 6px)}
+.ocr-scan-line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#1D9E75,transparent);animation:scanmove 2s linear infinite}
+@keyframes scanmove{0%{top:0}100%{top:100%}}
+.zoom-ctrl{display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 4px}
+.zoom-icon{font-size:15px;flex-shrink:0;line-height:1}
+.zoom-icon.small{font-size:13px}
+.zoom-slider{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#ddd;outline:none;cursor:pointer}
+.zoom-slider::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#1D9E75;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.2)}
+.zoom-slider::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#1D9E75;cursor:pointer;border:none}
+.zoom-val{font-size:12px;color:#1D9E75;font-weight:600;min-width:32px;text-align:right}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-size:10px;font-weight:600;color:#aaa;text-align:left;padding:7px 8px;border-bottom:1px solid #eee;text-transform:uppercase;white-space:nowrap}
+td{padding:9px 8px;border-bottom:1px solid #f0f0ee;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.mb{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:600}
+.mb-o{background:#e6f1fb;color:#185FA5}
+.mb-b{background:#e1f5ee;color:#0F6E56}
+.mb-m{background:#f1efe8;color:#888}
+.empty{text-align:center;padding:28px;color:#ccc;font-size:13px}
+.gas-note{background:#EAF3DE;border:1px solid #97C459;border-radius:8px;padding:10px 12px;font-size:12px;color:#3B6D11;line-height:1.6;margin-bottom:10px}
+.ocr-raw-label{font-size:10px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;margin-top:10px;margin-bottom:3px}
+.ocr-ai-result{display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#e8f8f2,#d4f0e4);border:1px solid #a8dfc8;border-radius:10px;padding:10px 13px;margin-top:10px}
+.ocr-ai-icon{font-size:10px;font-weight:700;color:#0F6E56;background:#c2edd8;padding:3px 8px;border-radius:20px;white-space:nowrap;flex-shrink:0}
+.ocr-ai-name{font-size:14px;font-weight:600;color:#0a4d3a;word-break:break-all}
+
+/* ── バーコード(html5-qrcode) 専用スタイル ── */
+#bc-reader{width:100%;border-radius:10px;overflow:hidden;background:#000}
+/* html5-qrcodeが生成するvideo/canvasを角丸に */
+#bc-reader video,#bc-reader canvas{border-radius:10px}
+/* ライブラリ内部のスキャン枠を非表示にして独自のガイドを使う */
+#bc-reader img{display:none!important}
+.bc-guide-overlay{position:relative;margin-top:-4px}
+.bc-guide-box{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:72%;height:80px;border:2px solid #1D9E75;border-radius:6px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)}
+.bc-guide-hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#fff;pointer-events:none}
+.bc-scan-status{margin-top:10px;min-height:36px;text-align:center}
+
+/* 自動転記フィードバックカード */
+.auto-log-card{background:linear-gradient(135deg,#e8f8f2,#d4f0e4);border:1px solid #a8dfc8;border-radius:12px;padding:14px;margin-top:10px;animation:fadeIn 0.3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.auto-log-title{font-size:11px;font-weight:700;color:#0F6E56;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px}
+.auto-log-name{font-size:15px;font-weight:600;color:#0a4d3a;margin-bottom:2px;word-break:break-all}
+.auto-log-bc{font-size:11px;color:#3B6D11;margin-bottom:6px}
+.auto-log-time{font-size:10px;color:#aaa}
+.auto-log-list{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.log-item{background:#fff;border:1px solid #e8e8e4;border-radius:10px;padding:10px 12px}
+.log-item-name{font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px;word-break:break-all}
+.log-item-bc{font-size:11px;color:#888}
+.log-item-time{font-size:10px;color:#bbb;margin-top:2px}
+.log-item-status{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;margin-top:4px}
+.ls-ok{background:#e1f5ee;color:#0F6E56}
+.ls-er{background:#fceaea;color:#c0392b}
+.ls-in{background:#e6f1fb;color:#185FA5}
+.mode-btn-grp{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
+.mode-btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid #ddd;background:#fff;color:#1a1a1a;display:inline-flex;align-items:center;gap:5px;-webkit-tap-highlight-color:transparent}
+.mode-btn.active{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.bc-stop-btn{width:100%;justify-content:center;margin-top:10px}
+.bc-continuous-badge{display:inline-flex;align-items:center;gap:5px;background:#1D9E75;color:#fff;font-size:11px;font-weight:600;padding:4px 12px;border-radius:20px;margin-bottom:8px}
+.bc-continuous-badge .dot-w{width:6px;height:6px;border-radius:50%;background:#fff;display:inline-block;animation:blink 1s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="hdr-icon"><svg viewBox="0 0 24 24"><path d="M20 3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h8v2zm3-4H7v-2h11v2zm0-4H7V7h11v2z"/></svg></div>
+  <div><div class="hdr-title">入庫台帳登録Webアプリ V1.7</div><div class="hdr-sub" id="hdr-sub">設定からGAS URLを入力してください</div></div>
+</div>
+<div class="tabs">
+  <div class="tab active" onclick="gotoTab('receive')">入庫登録</div>
+  <div class="tab" onclick="gotoTab('barcode')">バーコード連続登録</div>
+  <div class="tab" onclick="gotoTab('history')">入庫履歴</div>
+  <div class="tab" onclick="gotoTab('settings')">設定</div>
+</div>
+
+<!-- ══ 入庫登録タブ ══ -->
+<div id="tab-receive" class="content">
+  <div class="card">
+    <div class="ct">作業者情報</div>
+    <div class="fr"><label class="fl">作業者名</label><input type="text" id="worker" placeholder="作業者名を入力"></div>
+    <div class="fr"><label class="fl">入庫日</label><input type="date" id="recv-date"></div>
+  </div>
+  <div class="card">
+    <div class="ct">商品情報の取得</div>
+    <div class="mode-btn-grp">
+      <button class="mode-btn active" onclick="setMode('ocr')">📷 OCRで読取</button>
+      <button class="mode-btn" onclick="setMode('manual')">✏️ 手入力</button>
+    </div>
+    <!-- OCRモード -->
+    <div id="mode-ocr" class="cam-box">
+      <div class="cam-ph" id="ocr-ph">
+        <svg viewBox="0 0 24 24" fill="#ccc"><path d="M3 3h4V1H3C1.9 1 1 1.9 1 3v4h2V3zm14-2v2h4v4h2V3c0-1.1-.9-2-2-2h-4zM3 17H1v4c0 1.1.9 2 2 2h4v-2H3v-4zm18 4h-4v2h4c1.1 0 2-.9 2-2v-4h-2v4z"/></svg>
+        <div style="font-size:12px">枠内に品名を合わせて撮影→AIが商品名を自動抽出します</div>
+      </div>
+      <div class="ocr-viewer" id="ocr-viewer">
+        <video id="ocr-vid" autoplay playsinline></video>
+        <div class="ocr-overlay" id="ocr-overlay"></div>
+      </div>
+      <canvas id="ocr-cv"></canvas>
+      <div class="zoom-ctrl" id="zoom-ctrl" style="display:none">
+        <span class="zoom-icon small">🔍</span>
+        <input type="range" class="zoom-slider" id="zoom-slider" min="20" max="95" value="70" step="1" oninput="onZoomChange(this.value)">
+        <span class="zoom-icon">🔍</span>
+        <span class="zoom-val" id="zoom-val">70%</span>
+      </div>
+      <div class="br">
+        <button class="btn bp" onclick="startOCR()" id="ob-start">カメラ起動</button>
+        <button class="btn hidden" onclick="captureOCR()" id="ob-cap">撮影・解析</button>
+        <button class="btn bd bsm hidden" onclick="stopOCR()" id="ob-stop">停止</button>
+      </div>
+      <div id="ocr-prog" class="hidden"><div class="pb"><div class="pf" id="ocr-pf"></div></div><div class="pt" id="ocr-pt">解析中...</div></div>
+      <div id="ocr-out"></div>
+    </div>
+    <!-- 手入力モード -->
+    <div id="mode-manual" class="hidden">
+      <div class="fr" style="margin-top:8px">
+        <label class="fl">品名（手入力）</label>
+        <input type="text" id="manual-in" placeholder="品名を入力" oninput="document.getElementById('iname').value=this.value;document.getElementById('imethod').value='手入力'">
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">入庫情報</div>
+    <div class="fr"><label class="fl">品名</label><input type="text" id="iname" placeholder="品名"></div>
+    <div class="fr"><label class="fl">数量</label><div style="display:flex;gap:8px"><input type="text" id="iqty" value="1" style="width:80px"><input type="text" id="iunit" value="個" style="width:64px"></div></div>
+    <div class="fr"><label class="fl">備考</label><input type="text" id="imemo" placeholder="任意"></div>
+    <div class="fr"><label class="fl">入力方法</label><input type="text" id="imethod" readonly></div>
+    <div class="br" style="justify-content:flex-start;margin-top:0">
+      <button class="btn bp" onclick="doSubmit()" style="flex:1;justify-content:center">✓ 台帳に記録する</button>
+      <button class="btn" onclick="clearForm()">クリア</button>
+    </div>
+    <div id="sub-result"></div>
+  </div>
+</div>
+
+<!-- ══ バーコード連続登録タブ ══ -->
+<div id="tab-barcode" class="content hidden">
+  <div class="card">
+    <div class="ct">作業者情報</div>
+    <div class="fr"><label class="fl">作業者名</label><input type="text" id="bc-worker" placeholder="作業者名を入力"></div>
+    <div class="fr"><label class="fl">入庫日</label><input type="date" id="bc-date"></div>
+  </div>
+  <div class="card">
+    <div class="ct">バーコード連続登録</div>
+    <div class="gas-note" style="margin-bottom:12px">
+      スキャンすると自動でAIが品名を取得し、スプレッドシートに記録します。<br>記録後、次のスキャン待機に自動で戻ります。
+    </div>
+    <!-- スキャナー起動前 -->
+    <div id="bc-start-area" style="text-align:center;padding:16px 0">
+      <button class="btn bp" style="font-size:14px;padding:11px 28px" onclick="startBcContinuous()">▦ スキャン開始</button>
+    </div>
+    <!-- スキャナー起動中 -->
+    <div id="bc-scanner-area" class="hidden">
+      <div class="bc-continuous-badge"><span class="dot-w"></span>スキャン待機中</div>
+      <div id="bc-reader"></div>
+      <button class="btn bd bsm bc-stop-btn" onclick="stopBcContinuous()">■ スキャン停止</button>
+      <div class="bc-scan-status" id="bc-scan-status"></div>
+    </div>
+  </div>
+  <!-- 登録ログ -->
+  <div class="card" id="bc-log-card" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:600">今回の登録ログ</span>
+      <button class="btn bsm bd" onclick="clearBcLog()">クリア</button>
+    </div>
+    <div class="auto-log-list" id="bc-log-list"></div>
+  </div>
+</div>
+
+<!-- ══ 入庫履歴タブ ══ -->
+<div id="tab-history" class="content hidden">
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:600">入庫履歴（最新100件）</span>
+      <button class="btn bsm" onclick="loadHistory()">更新</button>
+    </div>
+    <div id="hist-list"><div class="empty">「更新」を押して読み込む</div></div>
+  </div>
+</div>
+
+<!-- ══ 設定タブ ══ -->
+<div id="tab-settings" class="content hidden">
+  <div class="card">
+    <div class="ct">GAS Webhook URL</div>
+    <div class="gas-note">GASをデプロイして発行されたURLを貼り付けてください。</div>
+    <div class="fr"><label class="fl">GAS URL</label><input type="text" id="gas-url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn bp bsm" onclick="saveGAS()">保存</button>
+      <button class="btn bsm" onclick="testGAS()">接続テスト</button>
+    </div>
+    <div id="gas-status" style="font-size:12px;margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <div class="ct">デフォルト作業者名</div>
+    <div class="fr"><input type="text" id="def-worker" placeholder="よく使う名前"></div>
+    <button class="btn bp bsm" onclick="saveWorker()">保存</button>
+  </div>
+</div>
+
+<script>
+// ─── グローバル変数 ───────────────────────────────────────
+let ocrStream = null;
+let gasUrl = localStorage.getItem('inv_gas_url') || '';
+let frameSize = 0.70;
+const today = new Date().toISOString().slice(0, 10);
+
+// バーコード連続登録用
+let html5QrScanner = null;
+let bcCooldown = false;       // 連続誤検知防止フラグ
+let bcLogItems = [];          // 今回セッションのログ
+
+// ─── 初期化 ───────────────────────────────────────────────
+document.getElementById('recv-date').value = today;
+document.getElementById('bc-date').value = today;
+if (gasUrl) {
+  document.getElementById('gas-url').value = gasUrl;
+  document.getElementById('hdr-sub').textContent = 'Google Sheetsに接続済み';
+}
+const dw = localStorage.getItem('inv_def_worker') || '';
+if (dw) {
+  document.getElementById('worker').value = dw;
+  document.getElementById('bc-worker').value = dw;
+  document.getElementById('def-worker').value = dw;
+}
+const sw = sessionStorage.getItem('inv_w');
+if (sw) {
+  document.getElementById('worker').value = sw;
+  document.getElementById('bc-worker').value = sw;
+}
+document.getElementById('worker').addEventListener('input', function() {
+  sessionStorage.setItem('inv_w', this.value);
+});
+document.getElementById('bc-worker').addEventListener('input', function() {
+  sessionStorage.setItem('inv_w', this.value);
+  document.getElementById('worker').value = this.value;
+});
+
+// ─── タブ切替 ────────────────────────────────────────────
+function gotoTab(n) {
+  ['receive','barcode','history','settings'].forEach((t, i) => {
+    document.getElementById('tab-' + t).classList.toggle('hidden', t !== n);
+    document.querySelectorAll('.tab')[i].classList.toggle('active', t === n);
+  });
+  if (n === 'history') loadHistory();
+  // バーコードタブを離れたらスキャナー停止
+  if (n !== 'barcode') stopBcContinuous();
+}
+
+// ─── 入庫登録タブ: モード切替 ────────────────────────────
+function setMode(m) {
+  ['ocr','manual'].forEach(x => {
+    document.getElementById('mode-' + x).classList.add('hidden');
+    document.querySelectorAll('.mode-btn').forEach((b, i) => {
+      b.classList.toggle('active', ['ocr','manual'][i] === m);
+    });
+  });
+  document.getElementById('mode-' + m).classList.remove('hidden');
+  if (m === 'ocr') document.getElementById('imethod').value = 'OCR';
+  if (m === 'manual') document.getElementById('imethod').value = '手入力';
+  stopOCR();
+}
+
+// ─── OCR機能 ─────────────────────────────────────────────
+function onZoomChange(val) {
+  frameSize = parseInt(val) / 100;
+  document.getElementById('zoom-val').textContent = val + '%';
+  buildOCROverlay();
+}
+function buildOCROverlay() {
+  const overlay = document.getElementById('ocr-overlay');
+  const fw = frameSize, fh = Math.min(frameSize * 0.45, 0.6), fx = (1 - fw) / 2, fy = (1 - fh) / 2;
+  const pct = v => (v * 100).toFixed(2) + '%';
+  overlay.innerHTML = `<div class="ocr-mask" style="top:0;left:0;right:0;height:${pct(fy)}"></div><div class="ocr-mask" style="bottom:0;left:0;right:0;height:${pct(1-fy-fh)}"></div><div class="ocr-mask" style="top:${pct(fy)};bottom:${pct(1-fy-fh)};left:0;width:${pct(fx)}"></div><div class="ocr-mask" style="top:${pct(fy)};bottom:${pct(1-fy-fh)};right:0;width:${pct(1-fx-fw)}"></div><div class="ocr-frame" style="left:${pct(fx)};top:${pct(fy)};width:${pct(fw)};height:${pct(fh)}"><div class="ocr-corner tl"></div><div class="ocr-corner tr"></div><div class="ocr-corner bl"></div><div class="ocr-corner br"></div><div class="ocr-label">品名をこの枠内に収めてください</div><div class="ocr-scan-line"></div></div>`;
+}
+async function startOCR() {
+  try {
+    ocrStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720}}});
+    const v = document.getElementById('ocr-vid');
+    v.srcObject = ocrStream;
+    document.getElementById('ocr-viewer').style.display = 'block';
+    document.getElementById('ocr-ph').classList.add('hidden');
+    document.getElementById('ob-start').classList.add('hidden');
+    document.getElementById('ob-cap').classList.remove('hidden');
+    document.getElementById('ob-stop').classList.remove('hidden');
+    document.getElementById('zoom-ctrl').style.display = 'flex';
+    buildOCROverlay();
+  } catch(e) {
+    document.getElementById('ocr-out').innerHTML = '<div class="badge bs-er"><span class="dot"></span>カメラアクセスが拒否されました</div>';
+  }
+}
+function stopOCR() {
+  if (ocrStream) { ocrStream.getTracks().forEach(t => t.stop()); ocrStream = null; }
+  document.getElementById('ocr-viewer').style.display = 'none';
+  document.getElementById('zoom-ctrl').style.display = 'none';
+  document.getElementById('ocr-ph').classList.remove('hidden');
+  document.getElementById('ob-start').classList.remove('hidden');
+  document.getElementById('ob-cap').classList.add('hidden');
+  document.getElementById('ob-stop').classList.add('hidden');
+}
+function extractProductNameViaGAS(ocrText) {
+  return new Promise((resolve, reject) => {
+    if (!gasUrl) { reject(new Error('GAS URL未設定')); return; }
+    const cbName = 'cb_extract_' + Date.now();
+    const script = document.createElement('script');
+    let done = false;
+    const cleanup = () => { try { document.head.removeChild(script); } catch(e) {} delete window[cbName]; };
+    window[cbName] = (data) => {
+      if (done) return; done = true; cleanup();
+      if (data.status === 'ok') resolve(data.name);
+      else reject(new Error(data.message || 'GASエラー'));
+    };
+    const encoded = encodeURIComponent(ocrText).slice(0, 800);
+    script.src = gasUrl + '?action=extractName&ocrText=' + encoded + '&callback=' + cbName;
+    script.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error('通信エラー')); };
+    setTimeout(() => { if (done) return; done = true; cleanup(); reject(new Error('タイムアウト')); }, 20000);
+    document.head.appendChild(script);
+  });
+}
+async function captureOCR() {
+  const v = document.getElementById('ocr-vid'), c = document.getElementById('ocr-cv');
+  const vw = v.videoWidth, vh = v.videoHeight, fw = frameSize, fh = Math.min(frameSize * 0.45, 0.6), fx = (1 - fw) / 2, fy = (1 - fh) / 2;
+  const cropX = Math.round(vw * fx), cropY = Math.round(vh * fy), cropW = Math.round(vw * fw), cropH = Math.round(vh * fh);
+  c.width = cropW; c.height = cropH;
+  c.getContext('2d').drawImage(v, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  document.getElementById('ocr-prog').classList.remove('hidden');
+  const pf = document.getElementById('ocr-pf'), pt = document.getElementById('ocr-pt');
+  try {
+    pt.textContent = 'テキスト認識中...';
+    const r = await Tesseract.recognize(c.toDataURL('image/jpeg', 0.95), 'jpn+eng', {logger: m => { if (m.status === 'recognizing text') { pf.style.width = (m.progress * 70) + '%'; pt.textContent = 'OCR解析中... ' + Math.round(m.progress * 100) + '%'; } }});
+    pf.style.width = '75%';
+    const rawText = r.data.text.trim().replace(/\s+/g, ' ');
+    if (!rawText) {
+      document.getElementById('ocr-out').innerHTML = '<div class="badge bs-er"><span class="dot"></span>テキストを認識できませんでした。枠を調整して再撮影してください。</div>';
+      return;
+    }
+    pt.textContent = 'AIが商品名を抽出中...';
+    pf.style.width = '85%';
+    const productName = await extractProductNameViaGAS(rawText).catch(err => { console.warn('AI抽出失敗:', err.message); return null; });
+    pf.style.width = '100%';
+    const finalName = (productName && productName !== '不明') ? productName : rawText;
+    document.getElementById('iname').value = finalName;
+    let html = '<div class="ocr-raw-label">OCR生テキスト</div><div class="ocr-box">' + rawText + '</div>';
+    if (productName && productName !== '不明') {
+      html += '<div class="ocr-ai-result"><span class="ocr-ai-icon">✦ AI抽出</span><span class="ocr-ai-name">' + productName + '</span></div>';
+      html += '<div class="badge bs-ok" style="margin-top:6px"><span class="dot"></span>品名を自動抽出しました</div>';
+    } else {
+      html += '<div class="badge bs-in" style="margin-top:6px"><span class="dot"></span>OCRテキストをそのまま使用します</div>';
+    }
+    document.getElementById('ocr-out').innerHTML = html;
+  } catch(e) {
+    document.getElementById('ocr-out').innerHTML = '<div class="badge bs-er"><span class="dot"></span>OCRエラー: ' + e.message + '</div>';
+  }
+  setTimeout(() => { document.getElementById('ocr-prog').classList.add('hidden'); pf.style.width = '0'; }, 1500);
+}
+
+// ─── バーコード連続登録 (html5-qrcode) ───────────────────
+
+/**
+ * バーコードスキャン成功コールバック
+ * @param {string} barcode 読み取ったバーコード値
+ */
+async function onBcSuccess(barcode) {
+  // クールダウン中（前回スキャンから1.5秒以内）は無視
+  if (bcCooldown) return;
+  bcCooldown = true;
+
+  const worker = document.getElementById('bc-worker').value.trim();
+  const date   = document.getElementById('bc-date').value;
+  if (!worker) {
+    setBcStatus('er', '⚠ 作業者名を入力してください');
+    setTimeout(() => { bcCooldown = false; setBcStatus('in', 'スキャン待機中...'); }, 2000);
+    return;
+  }
+  if (!gasUrl) {
+    setBcStatus('er', '⚠ 設定タブでGAS URLを登録してください');
+    setTimeout(() => { bcCooldown = false; setBcStatus('in', 'スキャン待機中...'); }, 2000);
+    return;
+  }
+
+  // ① スキャン完了表示
+  setBcStatus('in', '<span class="spin"></span> バーコード検出: ' + barcode + ' — AI品名取得中...');
+
+  // ② GAS経由でAI品名抽出
+  let productName = barcode; // フォールバック: バーコードをそのまま使用
+  try {
+    const name = await extractProductNameViaGAS('バーコード番号: ' + barcode);
+    if (name && name !== '不明') productName = name;
+  } catch(e) {
+    console.warn('AI品名取得失敗:', e.message);
+  }
+
+  // ③ スプレッドシートへ自動転記
+  setBcStatus('in', '<span class="spin"></span> スプレッドシートに記録中...');
+  const data = {
+    datetime: new Date().toLocaleString('ja-JP'),
+    worker,
+    date,
+    itemName: productName,
+    qty: '1',
+    unit: '個',
+    method: 'バーコード(html5-qrcode)',
+    barcode,
+    memo: ''
+  };
+  try {
+    await sendViaForm(data);
+    // ④ 成功ログ追加
+    addBcLog(barcode, productName, 'ok', data.datetime);
+    setBcStatus('ok', '✓ 記録完了: ' + productName);
+  } catch(e) {
+    addBcLog(barcode, productName, 'er', new Date().toLocaleString('ja-JP'));
+    setBcStatus('er', '✗ 記録失敗: ' + e.message);
+  }
+
+  // ⑤ 2秒後にスキャン待機に戻る
+  setTimeout(() => {
+    bcCooldown = false;
+    setBcStatus('in', 'スキャン待機中...');
+  }, 2000);
+}
+
+function setBcStatus(type, msg) {
+  const c = type === 'ok' ? 'bs-ok' : type === 'er' ? 'bs-er' : 'bs-in';
+  document.getElementById('bc-scan-status').innerHTML = '<div class="badge ' + c + '">' + msg + '</div>';
+}
+
+function addBcLog(barcode, name, status, datetime) {
+  bcLogItems.unshift({barcode, name, status, datetime});
+  renderBcLog();
+  document.getElementById('bc-log-card').style.display = 'block';
+}
+
+function renderBcLog() {
+  const list = document.getElementById('bc-log-list');
+  list.innerHTML = bcLogItems.map(item => {
+    const sc = item.status === 'ok' ? 'ls-ok' : 'ls-er';
+    const sl = item.status === 'ok' ? '✓ 記録済み' : '✗ エラー';
+    return `<div class="log-item">
+      <div class="log-item-name">${item.name}</div>
+      <div class="log-item-bc">バーコード: ${item.barcode}</div>
+      <div class="log-item-time">${item.datetime}</div>
+      <span class="log-item-status ${sc}">${sl}</span>
+    </div>`;
+  }).join('');
+}
+
+function clearBcLog() {
+  bcLogItems = [];
+  document.getElementById('bc-log-list').innerHTML = '';
+  document.getElementById('bc-log-card').style.display = 'none';
+}
+
+async function startBcContinuous() {
+  if (!gasUrl) {
+    alert('先に設定タブでGAS URLを登録してください。');
+    return;
+  }
+  document.getElementById('bc-start-area').classList.add('hidden');
+  document.getElementById('bc-scanner-area').classList.remove('hidden');
+  setBcStatus('in', 'スキャン待機中...');
+
+  const config = {
+    fps: 10,
+    qrbox: { width: 280, height: 100 },
+    aspectRatio: 1.5,
+    supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+    rememberLastUsedCamera: true,
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.CODE_93,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.ITF,
+      Html5QrcodeSupportedFormats.CODABAR,
+      Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.DATA_MATRIX,
+      Html5QrcodeSupportedFormats.PDF_417
+    ]
+  };
+
+  html5QrScanner = new Html5Qrcode('bc-reader');
+  try {
+    await html5QrScanner.start(
+      { facingMode: 'environment' },
+      config,
+      onBcSuccess,
+      (errorMsg) => { /* スキャン失敗は無視（連続スキャン中は常に発生） */ }
+    );
+  } catch(e) {
+    document.getElementById('bc-scanner-area').classList.add('hidden');
+    document.getElementById('bc-start-area').classList.remove('hidden');
+    setBcStatus('er', 'カメラエラー: ' + e);
+    alert('カメラの起動に失敗しました: ' + e);
+  }
+}
+
+async function stopBcContinuous() {
+  if (html5QrScanner) {
+    try {
+      await html5QrScanner.stop();
+      html5QrScanner.clear();
+    } catch(e) {}
+    html5QrScanner = null;
+  }
+  document.getElementById('bc-scanner-area').classList.add('hidden');
+  document.getElementById('bc-start-area').classList.remove('hidden');
+  bcCooldown = false;
+}
+
+// ─── 入庫登録タブ: 手動送信 ──────────────────────────────
+function showResult(type, msg) {
+  const c = type === 'ok' ? 'bs-ok' : type === 'er' ? 'bs-er' : 'bs-in';
+  const i = type === 'loading' ? '<span class="spin"></span>' : '<span class="dot"></span>';
+  document.getElementById('sub-result').innerHTML = '<div class="badge ' + c + '" style="margin-top:10px">' + i + msg + '</div>';
+}
+async function doSubmit() {
+  const worker = document.getElementById('worker').value.trim();
+  const itemName = document.getElementById('iname').value.trim();
+  if (!worker) { showResult('er', '作業者名を入力してください'); return; }
+  if (!itemName) { showResult('er', '品名を入力してください'); return; }
+  if (!gasUrl) { showResult('er', '設定タブでGAS URLを登録してください'); return; }
+  const data = {
+    datetime: new Date().toLocaleString('ja-JP'),
+    worker,
+    date: document.getElementById('recv-date').value,
+    itemName,
+    qty: document.getElementById('iqty').value || '1',
+    unit: document.getElementById('iunit').value || '個',
+    method: document.getElementById('imethod').value || '手入力',
+    barcode: '',
+    memo: document.getElementById('imemo').value
+  };
+  showResult('loading', 'スプレッドシートに記録中...');
+  await sendViaForm(data);
+  showResult('ok', '記録しました！');
+  clearForm();
+}
+function clearForm() {
+  ['iname','iqty','iunit','imemo','imethod','manual-in'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id === 'iqty') el.value = '1';
+    else if (id === 'iunit') el.value = '個';
+    else el.value = '';
+  });
+  ['ocr-out','sub-result'].forEach(id => document.getElementById(id).innerHTML = '');
+}
+
+// ─── 共通: GASへのフォーム送信 ───────────────────────────
+function sendViaForm(data) {
+  return new Promise((resolve) => {
+    const id = 'fr_' + Date.now();
+    const ifr = document.createElement('iframe');
+    ifr.name = id; ifr.style.display = 'none';
+    document.body.appendChild(ifr);
+    const form = document.createElement('form');
+    form.method = 'POST'; form.action = gasUrl; form.target = id; form.style.display = 'none';
+    Object.entries(data).forEach(([k, v]) => {
+      const inp = document.createElement('input');
+      inp.type = 'hidden'; inp.name = k; inp.value = v || '';
+      form.appendChild(inp);
+    });
+    document.body.appendChild(form);
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      setTimeout(() => { try { document.body.removeChild(form); document.body.removeChild(ifr); } catch(e) {} }, 500);
+      resolve('ok');
+    };
+    ifr.onload = finish;
+    setTimeout(finish, 5000);
+    form.submit();
+  });
+}
+
+// ─── JSONP (履歴取得用) ──────────────────────────────────
+function fetchJSONP(url) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'cb_' + Date.now();
+    const script = document.createElement('script');
+    let done = false;
+    window[cbName] = (data) => { if (done) return; done = true; delete window[cbName]; try { document.head.removeChild(script); } catch(e) {} resolve(data); };
+    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName;
+    script.onerror = () => { if (done) return; done = true; delete window[cbName]; reject(new Error('error')); };
+    setTimeout(() => { if (done) return; done = true; delete window[cbName]; try { document.head.removeChild(script); } catch(e) {} reject(new Error('timeout')); }, 8000);
+    document.head.appendChild(script);
+  });
+}
+
+// ─── 履歴 ────────────────────────────────────────────────
+async function loadHistory() {
+  if (!gasUrl) { document.getElementById('hist-list').innerHTML = '<div class="empty">設定タブでGAS URLを登録してください</div>'; return; }
+  document.getElementById('hist-list').innerHTML = '<div class="empty"><span class="spin"></span> 読み込み中...</div>';
+  try {
+    const records = await fetchJSONP(gasUrl + '?action=getRecords&limit=100');
+    if (!records || !records.length) { document.getElementById('hist-list').innerHTML = '<div class="empty">まだ記録がありません</div>'; return; }
+    let html = '<div class="tbl-wrap"><table><thead><tr><th>日時</th><th>品名</th><th>数量</th><th>作業者</th><th>方法</th></tr></thead><tbody>';
+    records.forEach(r => {
+      const mc = r.method && r.method.includes('OCR') ? 'mb-o' : r.method && r.method.includes('バーコード') ? 'mb-b' : 'mb-m';
+      const ml = r.method && r.method.includes('OCR') ? 'OCR' : r.method && r.method.includes('バーコード') ? 'BC' : '手入力';
+      html += '<tr><td style="font-size:10px;color:#aaa;white-space:nowrap">' + r.datetime + '</td><td style="font-weight:500">' + r.itemName + '</td><td style="white-space:nowrap">' + r.qty + r.unit + '</td><td>' + r.worker + '</td><td><span class="mb ' + mc + '">' + ml + '</span></td></tr>';
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('hist-list').innerHTML = html;
+  } catch(e) {
+    document.getElementById('hist-list').innerHTML = '<div class="empty">読み込みエラー: ' + e.message + '</div>';
+  }
+}
+
+// ─── 設定 ────────────────────────────────────────────────
+async function testGAS() {
+  if (!gasUrl) { document.getElementById('gas-status').textContent = 'URLを入力してください'; return; }
+  document.getElementById('gas-status').textContent = 'テスト中...';
+  document.getElementById('gas-status').style.color = '#185FA5';
+  await sendViaForm({datetime: new Date().toLocaleString('ja-JP'), worker: 'test', date: '', itemName: '__test__', qty: '0', unit: '', method: '接続テスト', barcode: '', memo: ''});
+  document.getElementById('gas-status').textContent = '✓ 送信完了。スプレッドシートに__test__行が追加されていれば成功です。';
+  document.getElementById('gas-status').style.color = '#3B6D11';
+}
+function saveGAS() {
+  gasUrl = document.getElementById('gas-url').value.trim();
+  localStorage.setItem('inv_gas_url', gasUrl);
+  document.getElementById('gas-status').textContent = '✓ 保存しました';
+  document.getElementById('gas-status').style.color = '#3B6D11';
+  document.getElementById('hdr-sub').textContent = gasUrl ? 'Google Sheetsに接続済み' : '設定からGAS URLを入力してください';
+}
+function saveWorker() {
+  const w = document.getElementById('def-worker').value.trim();
+  localStorage.setItem('inv_def_worker', w);
+  if (w) {
+    document.getElementById('worker').value = w;
+    document.getElementById('bc-worker').value = w;
+  }
+  alert('保存しました');
+}
+
+// 初期モード設定
+setMode('ocr');
+</script>
+</body>
+</html>
