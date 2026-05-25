@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>入庫台帳登録Webアプリ V1.7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
-<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
+<script src="https://unpkg.com/@ericblade/quagga2@1.4.0/dist/quagga.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
@@ -212,10 +211,9 @@ tr:last-child td{border-bottom:none}
     </div>
     <!-- スキャナー起動中 -->
     <div id="bc-scanner-area" class="hidden">
-      <div style="position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden">
-        <video id="bc-video" autoplay playsinline muted style="width:100%;display:block;max-height:280px;object-fit:cover"></video>
-        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:75%;height:90px;border:2px solid #1D9E75;border-radius:6px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)"></div>
-        <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#fff;pointer-events:none">バーコードを枠内に合わせてください</div>
+      <div id="bc-viewport" style="position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;min-height:200px">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:75%;height:90px;border:2px solid #1D9E75;border-radius:6px;pointer-events:none;z-index:2;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)"></div>
+        <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#fff;pointer-events:none;z-index:2">バーコードを枠内に合わせてください</div>
       </div>
       <div style="text-align:center;margin-top:10px">
         <button class="btn bd bsm" onclick="stopBcScan()">■ キャンセル</button>
@@ -432,7 +430,7 @@ async function captureOCR() {
   setTimeout(() => { document.getElementById('ocr-prog').classList.add('hidden'); pf.style.width = '0'; }, 1500);
 }
 
-// ─── バーコードスキャン (ZXing-js / ワンショット方式) ──────────────────
+// ─── バーコードスキャン (Quagga2 / ワンショット方式) ──────────────────
 
 function setBcStatus(type, msg) {
   const c = type === 'ok' ? 'bs-ok' : type === 'er' ? 'bs-er' : 'bs-in';
@@ -465,79 +463,90 @@ function clearBcLog() {
   document.getElementById('bc-log-card').style.display = 'none';
 }
 
-// ZXingスキャンループ用タイマー
-let bcScanTimer = null;
-let bcVideoStream = null;
+function stopQuagga() {
+  try { Quagga.offDetected(); } catch(e) {}
+  try { Quagga.stop(); } catch(e) {}
+}
 
 async function startBcScan() {
   const worker = document.getElementById('bc-worker').value.trim();
   if (!worker) { alert('作業者名を入力してください。'); return; }
   if (!gasUrl)  { alert('先に設定タブでGAS URLを登録してください。'); return; }
 
-  // 既存スキャン停止
-  stopBcScanLoop();
+  stopQuagga();
   bcCooldown = false;
 
-  // UI切替
   document.getElementById('bc-start-area').classList.add('hidden');
   document.getElementById('bc-result-area').classList.add('hidden');
   document.getElementById('bc-scanner-area').classList.remove('hidden');
   setBcStatus('in', '<span class="spin"></span> カメラ起動中...');
 
   const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
-  const constraints = {
-    video: {
-      facingMode: isIOS ? 'environment' : { ideal: 'environment' },
-      width:  { ideal: 1280 },
-      height: { ideal: 720 }
-    }
-  };
 
-  try {
-    bcVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch(e) {
-    // リアカメラ失敗時はデフォルトカメラで再試行
-    try {
-      bcVideoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-    } catch(e2) {
+  Quagga.init({
+    inputStream: {
+      name: 'Live',
+      type: 'LiveStream',
+      target: document.getElementById('bc-viewport'),
+      constraints: {
+        facingMode: isIOS ? 'environment' : { ideal: 'environment' },
+        width:  { min: 640, ideal: 1280, max: 1920 },
+        height: { min: 480, ideal: 720,  max: 1080 }
+      }
+    },
+    locator: { patchSize: 'medium', halfSample: true },
+    numOfWorkers: 0,   // iOSはWorker非対応のため0
+    frequency: 10,
+    decoder: {
+      readers: [
+        'ean_reader',
+        'ean_8_reader',
+        'code_128_reader',
+        'code_39_reader',
+        'code_93_reader',
+        'upc_reader',
+        'upc_e_reader',
+        'i2of5_reader',
+        'codabar_reader'
+      ]
+    },
+    locate: true
+  }, (err) => {
+    if (err) {
       document.getElementById('bc-scanner-area').classList.add('hidden');
       document.getElementById('bc-start-area').classList.remove('hidden');
-      alert('カメラの起動に失敗しました。\nカメラのアクセス許可を確認してください。\n\n詳細: ' + e2);
+      alert('カメラの起動に失敗しました。\nカメラのアクセス許可を確認してください。\n\n詳細: ' + err);
       return;
     }
-  }
+    Quagga.start();
+    setBcStatus('in', 'バーコードを枠内に合わせてください');
 
-  const video = document.getElementById('bc-video');
-  video.srcObject = bcVideoStream;
-  await video.play();
+    // 検出イベント（信頼度フィルタ付き）
+    Quagga.onDetected((data) => {
+      if (bcCooldown) return;
 
-  setBcStatus('in', 'バーコードを枠内に合わせてください');
+      // 信頼度チェック: 全コードが一定以上の信頼度を持つものだけ採用
+      const code = data.codeResult;
+      const errors = code.decodedCodes
+        .filter(c => c.error !== undefined)
+        .map(c => c.error);
+      const avgError = errors.length
+        ? errors.reduce((a, b) => a + b, 0) / errors.length
+        : 1;
 
-  // ZXingBrowser.BrowserMultiFormatReader でデコード（iOS Chrome含む全環境対応）
-  const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
-  setBcStatus('in', 'バーコードを枠内に合わせてください');
+      if (avgError > 0.25) return; // 信頼度が低い場合は無視
 
-  // decodeFromVideoElement でvideoから直接連続デコード
-  codeReader.decodeFromVideoElement(video, (result, err, controls) => {
-    if (result && !bcCooldown) {
-      controls.stop();
-      onBcDetected(result.getText());
-    }
-    // err は NotFoundException が連続で来るのが正常、無視する
-  }).catch(e => {
-    console.error('ZXing起動エラー:', e);
+      onBcDetected(code.code);
+    });
   });
-
-  // stopBcScanLoop から停止できるようにcodeReaderを保持
-  window._bcCodeReader = codeReader;
 }
 
 async function onBcDetected(barcode) {
   if (bcCooldown) return;
   bcCooldown = true;
 
-  // カメラ・ループを即停止
-  stopBcScanLoop();
+  stopQuagga();
+
   document.getElementById('bc-scanner-area').classList.add('hidden');
   document.getElementById('bc-start-area').classList.remove('hidden');
 
@@ -561,7 +570,7 @@ async function onBcDetected(barcode) {
       worker, date,
       itemName: productName,
       qty: '1', unit: '個',
-      method: 'バーコード(ZXing)',
+      method: 'バーコード(Quagga2)',
       barcode, memo: ''
     });
 
@@ -580,25 +589,11 @@ async function onBcDetected(barcode) {
   }
 }
 
-function stopBcScanLoop() {
-  // ZXingBrowserのデコードループを停止
-  if (window._bcCodeReader) {
-    try { window._bcCodeReader.reset(); } catch(e) {}
-    window._bcCodeReader = null;
-  }
-  if (bcScanTimer) { clearTimeout(bcScanTimer); bcScanTimer = null; }
-  if (bcVideoStream) {
-    bcVideoStream.getTracks().forEach(t => t.stop());
-    bcVideoStream = null;
-  }
-  const video = document.getElementById('bc-video');
-  if (video) { video.srcObject = null; }
-}
-
 async function stopBcScan() {
-  stopBcScanLoop();
+  stopQuagga();
   bcCooldown = false;
   document.getElementById('bc-scanner-area').classList.add('hidden');
+  document.getElementById('bc-result-area').classList.add('hidden');
   document.getElementById('bc-start-area').classList.remove('hidden');
 }
 
