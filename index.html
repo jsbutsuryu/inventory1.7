@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>入庫台帳登録Webアプリ V1.7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
@@ -211,7 +212,11 @@ tr:last-child td{border-bottom:none}
     </div>
     <!-- スキャナー起動中 -->
     <div id="bc-scanner-area" class="hidden">
-      <div id="bc-reader"></div>
+      <div style="position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden">
+        <video id="bc-video" autoplay playsinline muted style="width:100%;display:block;max-height:280px;object-fit:cover"></video>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:75%;height:90px;border:2px solid #1D9E75;border-radius:6px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)"></div>
+        <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#fff;pointer-events:none">バーコードを枠内に合わせてください</div>
+      </div>
       <div style="text-align:center;margin-top:10px">
         <button class="btn bd bsm" onclick="stopBcScan()">■ キャンセル</button>
       </div>
@@ -427,7 +432,7 @@ async function captureOCR() {
   setTimeout(() => { document.getElementById('ocr-prog').classList.add('hidden'); pf.style.width = '0'; }, 1500);
 }
 
-// ─── バーコードスキャン (html5-qrcode / ワンショット方式) ──────────────
+// ─── バーコードスキャン (ZXing-js / ワンショット方式) ──────────────────
 
 function setBcStatus(type, msg) {
   const c = type === 'ok' ? 'bs-ok' : type === 'er' ? 'bs-er' : 'bs-in';
@@ -460,17 +465,17 @@ function clearBcLog() {
   document.getElementById('bc-log-card').style.display = 'none';
 }
 
+// ZXingスキャンループ用タイマー
+let bcScanTimer = null;
+let bcVideoStream = null;
+
 async function startBcScan() {
   const worker = document.getElementById('bc-worker').value.trim();
   if (!worker) { alert('作業者名を入力してください。'); return; }
   if (!gasUrl)  { alert('先に設定タブでGAS URLを登録してください。'); return; }
 
-  // 既存スキャナーを確実に停止・破棄
-  if (html5QrScanner) {
-    try { await html5QrScanner.stop(); } catch(e) {}
-    try { html5QrScanner.clear(); } catch(e) {}
-    html5QrScanner = null;
-  }
+  // 既存スキャン停止
+  stopBcScanLoop();
   bcCooldown = false;
 
   // UI切替
@@ -479,98 +484,87 @@ async function startBcScan() {
   document.getElementById('bc-scanner-area').classList.remove('hidden');
   setBcStatus('in', '<span class="spin"></span> カメラ起動中...');
 
-  // カメラデバイス一覧を取得して最適なカメラを選ぶ
-  let cameraId;
-  try {
-    const devices = await Html5Qrcode.getCameras();
-    if (!devices || devices.length === 0) throw new Error('カメラが見つかりません');
-    // リアカメラ優先（"back" を含む名前）、なければ最後のデバイス（PC内蔵カメラは通常1つ）
-    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      const back = devices.find(d => /back|rear|environment/i.test(d.label));
-      cameraId = back ? back.id : devices[devices.length - 1].id;
-    } else {
-      // PCはデバイスリストの先頭（通常は唯一のWebカメラ）
-      cameraId = devices[0].id;
+  const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+  const constraints = {
+    video: {
+      facingMode: isIOS ? 'environment' : { ideal: 'environment' },
+      width:  { ideal: 1280 },
+      height: { ideal: 720 }
     }
-  } catch(e) {
-    document.getElementById('bc-scanner-area').classList.add('hidden');
-    document.getElementById('bc-start-area').classList.remove('hidden');
-    alert('カメラの取得に失敗しました。\nブラウザのカメラ許可を確認してください。\n\n詳細: ' + e);
-    return;
-  }
-
-  // qrboxはビデオサイズより小さくする（大きいとライブラリ内部エラーで検出停止）
-  // PCカメラは小さいことが多いので固定サイズでなく比率指定
-  const config = {
-    fps: 15,
-    qrbox: (w, h) => {
-      // 映像の70%幅、高さは幅の40%（バーコード向け横長）
-      const size = Math.min(Math.floor(w * 0.7), 400);
-      return { width: size, height: Math.max(Math.floor(size * 0.4), 80) };
-    },
-    aspectRatio: 1.5,
-    supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
   };
 
-  html5QrScanner = new Html5Qrcode('bc-reader');
   try {
-    await html5QrScanner.start(cameraId, config, onBcDetected, () => {});
-    setBcStatus('in', 'バーコードを枠内に映してください');
+    bcVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch(e) {
-    document.getElementById('bc-scanner-area').classList.add('hidden');
-    document.getElementById('bc-start-area').classList.remove('hidden');
-    html5QrScanner = null;
-    alert('カメラの起動に失敗しました。\n\n詳細: ' + e);
+    // リアカメラ失敗時はデフォルトカメラで再試行
+    try {
+      bcVideoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    } catch(e2) {
+      document.getElementById('bc-scanner-area').classList.add('hidden');
+      document.getElementById('bc-start-area').classList.remove('hidden');
+      alert('カメラの起動に失敗しました。\nカメラのアクセス許可を確認してください。\n\n詳細: ' + e2);
+      return;
+    }
   }
+
+  const video = document.getElementById('bc-video');
+  video.srcObject = bcVideoStream;
+  await video.play();
+
+  setBcStatus('in', 'バーコードを枠内に合わせてください');
+
+  // ZXingBrowser.BrowserMultiFormatReader でデコード（iOS Chrome含む全環境対応）
+  const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
+  setBcStatus('in', 'バーコードを枠内に合わせてください');
+
+  // decodeFromVideoElement でvideoから直接連続デコード
+  codeReader.decodeFromVideoElement(video, (result, err, controls) => {
+    if (result && !bcCooldown) {
+      controls.stop();
+      onBcDetected(result.getText());
+    }
+    // err は NotFoundException が連続で来るのが正常、無視する
+  }).catch(e => {
+    console.error('ZXing起動エラー:', e);
+  });
+
+  // stopBcScanLoop から停止できるようにcodeReaderを保持
+  window._bcCodeReader = codeReader;
 }
 
-/**
- * バーコード検出コールバック（ワンショット: 検出後すぐカメラ停止）
- */
 async function onBcDetected(barcode) {
   if (bcCooldown) return;
   bcCooldown = true;
 
-  // カメラを即停止
-  const scanner = html5QrScanner;
-  html5QrScanner = null;
-  if (scanner) {
-    try { await scanner.stop(); } catch(e) {}
-    try { scanner.clear(); } catch(e) {}
-  }
-
-  // スキャナーUIを隠して処理中表示
+  // カメラ・ループを即停止
+  stopBcScanLoop();
   document.getElementById('bc-scanner-area').classList.add('hidden');
   document.getElementById('bc-start-area').classList.remove('hidden');
-  setBcStatus('in', '<span class="spin"></span> 検出: ' + barcode + ' — AI品名取得中...');
-  document.getElementById('bc-scan-status').style.display = 'block';
 
   const worker = document.getElementById('bc-worker').value.trim();
   const date   = document.getElementById('bc-date').value;
 
   try {
-    // AI品名抽出
+    setBcStatus('in', '<span class="spin"></span> 検出: ' + barcode + ' — AI品名取得中...');
+
     let productName = barcode;
     try {
       const name = await extractProductNameViaGAS('バーコード番号: ' + barcode);
       if (name && name !== '不明') productName = name;
     } catch(e) {
-      console.warn('AI品名取得失敗（バーコード番号をそのまま使用）:', e.message);
+      console.warn('AI品名取得失敗:', e.message);
     }
 
-    // GAS転記
     setBcStatus('in', '<span class="spin"></span> スプレッドシートに記録中...');
     await sendViaForm({
       datetime: new Date().toLocaleString('ja-JP'),
       worker, date,
       itemName: productName,
       qty: '1', unit: '個',
-      method: 'バーコード(html5-qrcode)',
+      method: 'バーコード(ZXing)',
       barcode, memo: ''
     });
 
-    // 成功表示
     addBcLog(barcode, productName, 'ok', new Date().toLocaleString('ja-JP'));
     setBcStatus('ok', '✓ 記録完了: ' + productName);
     document.getElementById('bc-result-name').textContent = productName;
@@ -586,13 +580,23 @@ async function onBcDetected(barcode) {
   }
 }
 
-async function stopBcScan() {
-  const scanner = html5QrScanner;
-  html5QrScanner = null;
-  if (scanner) {
-    try { await scanner.stop(); } catch(e) {}
-    try { scanner.clear(); } catch(e) {}
+function stopBcScanLoop() {
+  // ZXingBrowserのデコードループを停止
+  if (window._bcCodeReader) {
+    try { window._bcCodeReader.reset(); } catch(e) {}
+    window._bcCodeReader = null;
   }
+  if (bcScanTimer) { clearTimeout(bcScanTimer); bcScanTimer = null; }
+  if (bcVideoStream) {
+    bcVideoStream.getTracks().forEach(t => t.stop());
+    bcVideoStream = null;
+  }
+  const video = document.getElementById('bc-video');
+  if (video) { video.srcObject = null; }
+}
+
+async function stopBcScan() {
+  stopBcScanLoop();
   bcCooldown = false;
   document.getElementById('bc-scanner-area').classList.add('hidden');
   document.getElementById('bc-start-area').classList.remove('hidden');
