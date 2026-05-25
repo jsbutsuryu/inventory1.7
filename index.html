@@ -487,10 +487,7 @@ async function startBcScan() {
   } catch(e) {
     document.getElementById('bc-scanner-area').classList.add('hidden');
     document.getElementById('bc-start-area').classList.remove('hidden');
-    alert('カメラ一覧の取得に失敗しました。
-カメラのアクセス許可を確認してください。
-
-'+e);
+    alert('カメラ一覧の取得に失敗しました。\nカメラのアクセス許可を確認してください。\n\n'+e);
     return;
   }
   if (!cameras || cameras.length === 0) {
@@ -536,9 +533,7 @@ async function startBcScan() {
     await _stopH5();
     document.getElementById('bc-scanner-area').classList.add('hidden');
     document.getElementById('bc-start-area').classList.remove('hidden');
-    alert('カメラの起動に失敗しました。
-
-'+e);
+    alert('カメラの起動に失敗しました。\n\n'+e);
   }
 }
 
