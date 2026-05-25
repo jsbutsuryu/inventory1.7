@@ -519,41 +519,44 @@ async function startBcContinuous() {
   document.getElementById('bc-scanner-area').classList.remove('hidden');
   setBcStatus('in', 'スキャン待機中...');
 
+  // PCとスマホ両対応: formatsToSupportは指定しない（全フォーマット自動検出）
   const config = {
-    fps: 10,
-    qrbox: { width: 280, height: 100 },
+    fps: 15,
+    qrbox: { width: 300, height: 150 },  // 高さを広げてPCカメラでも検出しやすく
     aspectRatio: 1.5,
     supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-    rememberLastUsedCamera: true,
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.CODE_93,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.ITF,
-      Html5QrcodeSupportedFormats.CODABAR,
-      Html5QrcodeSupportedFormats.QR_CODE,
-      Html5QrcodeSupportedFormats.DATA_MATRIX,
-      Html5QrcodeSupportedFormats.PDF_417
-    ]
+    rememberLastUsedCamera: true
+    // formatsToSupport は指定しない → 全フォーマット検出（Edge/Safari両対応）
   };
 
   html5QrScanner = new Html5Qrcode('bc-reader');
+
+  // カメラ選択: スマホはリアカメラ優先、PCはデフォルト（facingMode指定なし）
+  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  const cameraConstraint = isMobile ? { facingMode: 'environment' } : { facingMode: 'user' };
+
   try {
     await html5QrScanner.start(
-      { facingMode: 'environment' },
+      cameraConstraint,
       config,
       onBcSuccess,
-      (errorMsg) => { /* スキャン失敗は無視（連続スキャン中は常に発生） */ }
+      (errorMsg) => { /* スキャン中の一時エラーは無視 */ }
     );
   } catch(e) {
-    document.getElementById('bc-scanner-area').classList.add('hidden');
-    document.getElementById('bc-start-area').classList.remove('hidden');
-    setBcStatus('er', 'カメラエラー: ' + e);
-    alert('カメラの起動に失敗しました: ' + e);
+    // facingModeでエラーの場合はカメラIDなしで再試行
+    try {
+      await html5QrScanner.start(
+        { facingMode: 'user' },
+        config,
+        onBcSuccess,
+        (errorMsg) => {}
+      );
+    } catch(e2) {
+      document.getElementById('bc-scanner-area').classList.add('hidden');
+      document.getElementById('bc-start-area').classList.remove('hidden');
+      setBcStatus('er', 'カメラエラー: ' + e2);
+      alert('カメラの起動に失敗しました。\nカメラのアクセス許可を確認してください。\n\n詳細: ' + e2);
+    }
   }
 }
 
