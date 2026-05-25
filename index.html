@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>入庫台帳登録Webアプリ V1.7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-<!-- BarcodeDetector polyfill: iOS 16未満 / 非対応ブラウザ向け -->
-<script src="https://unpkg.com/barcode-detector@2.2.5/dist/es2019/polyfill.js"></script>
+
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
@@ -471,7 +470,12 @@ function stopBcStream() {
   if (bcRafId) { cancelAnimationFrame(bcRafId); bcRafId = null; }
   if (bcStream) { bcStream.getTracks().forEach(t=>t.stop()); bcStream = null; }
   const v = document.getElementById('bc-video');
-  if (v) v.srcObject = null;
+  if (v) { v.srcObject = null; v.style.display = 'block'; }
+  // フォールバックスキャナー（html5-qrcode）の停止
+  if (window._bcFallbackScanner) {
+    try { window._bcFallbackScanner.stop(); } catch(e) {}
+    window._bcFallbackScanner = null;
+  }
 }
 
 async function startBcScan() {
@@ -487,16 +491,23 @@ async function startBcScan() {
   document.getElementById('bc-scanner-area').classList.remove('hidden');
   setBcStatus('in', '<span class="spin"></span> カメラ起動中...');
 
-  // BarcodeDetector 初期化（polyfillが自動的にネイティブ/ZXingを切替）
-  try {
-    bcDetector = new BarcodeDetector({ formats: [
-      'ean_13','ean_8','code_128','code_39','code_93',
-      'upc_a','upc_e','itf','codabar','qr_code','data_matrix','pdf417'
-    ]});
-  } catch(e) {
-    // formats指定が拒否された場合はデフォルトで初期化
-    try { bcDetector = new BarcodeDetector(); }
-    catch(e2) { alert('BarcodeDetectorが使えません: '+e2); return; }
+  // BarcodeDetector 初期化
+  // ネイティブ対応: Chrome(Android含む), Safari iOS16+
+  // 非対応: iOS Chrome など → canvas+手動デコードにフォールバック
+  if (typeof BarcodeDetector === 'undefined') {
+    // BarcodeDetector非対応環境: getUserMedia+canvasで映像を取得し
+    // 別途フォールバックスキャンを実行
+    bcDetector = null;
+  } else {
+    try {
+      bcDetector = new BarcodeDetector({ formats: [
+        'ean_13','ean_8','code_128','code_39','code_93',
+        'upc_a','upc_e','itf','codabar','qr_code','data_matrix','pdf417'
+      ]});
+    } catch(e) {
+      try { bcDetector = new BarcodeDetector(); }
+      catch(e2) { bcDetector = null; }
+    }
   }
 
   // カメラ起動
@@ -527,27 +538,71 @@ async function startBcScan() {
 
   setBcStatus('in', 'バーコードを枠内に合わせてください');
 
-  // requestAnimationFrame ループでフレームごとに検出
   const canvas = document.getElementById('bc-canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  const tick = async () => {
-    if (!bcStream || bcCooldown) return;
-    if (video.readyState >= 2) {
-      canvas.width  = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
-      try {
-        const results = await bcDetector.detect(canvas);
-        if (results && results.length > 0) {
-          const code = results[0].rawValue;
-          if (code) { onBcDetected(code); return; }
-        }
-      } catch(e) { /* 未検出は正常 */ }
-    }
+  if (bcDetector) {
+    // ── BarcodeDetector対応環境（Chrome/Android/Safari iOS16+）──
+    const tick = async () => {
+      if (!bcStream || bcCooldown) return;
+      if (video.readyState >= 2) {
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        try {
+          const results = await bcDetector.detect(canvas);
+          if (results && results.length > 0) {
+            const code = results[0].rawValue;
+            if (code) { onBcDetected(code); return; }
+          }
+        } catch(e) { /* 未検出は正常 */ }
+      }
+      bcRafId = requestAnimationFrame(tick);
+    };
     bcRafId = requestAnimationFrame(tick);
-  };
-  bcRafId = requestAnimationFrame(tick);
+
+  } else {
+    // ── BarcodeDetector非対応（iOS Chrome等）── html5-qrcodeで代替
+    // html5-qrcodeを動的に読み込んでからスキャン開始
+    video.style.display = 'none'; // html5-qrcodeが独自にvideoを生成するため非表示
+    stopBcStream();               // getUserMediaのストリームを解放
+
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+
+    const videoWrapper = document.querySelector('#bc-scanner-area > div');
+    videoWrapper.innerHTML = '<div id="bc-reader2" style="width:100%"></div>';
+
+    const isMobile2 = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    const scanner = new Html5Qrcode('bc-reader2');
+    window._bcFallbackScanner = scanner;
+
+    const cfg = {
+      fps: 15,
+      qrbox: (w,h) => ({ width: Math.floor(w*0.75), height: Math.max(Math.floor(w*0.3),80) }),
+      aspectRatio: 1.5,
+      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+    };
+    try {
+      const devices = await Html5Qrcode.getCameras();
+      const cam = isMobile2
+        ? (devices.find(d=>/back|rear|environment/i.test(d.label)) || devices[devices.length-1])
+        : devices[0];
+      await scanner.start(cam.id, cfg,
+        (code) => { if(!bcCooldown){ onBcDetected(code); } },
+        () => {}
+      );
+    } catch(e) {
+      document.getElementById('bc-scanner-area').classList.add('hidden');
+      document.getElementById('bc-start-area').classList.remove('hidden');
+      alert('カメラ起動失敗: '+e);
+    }
+  }
 }
 
 async function onBcDetected(barcode) {
